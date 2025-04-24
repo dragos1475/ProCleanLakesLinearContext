@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ model_name }} - Regression Analysis Report</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            line-height: 1.6;
+            margin: 0;
+            padding: 20px;
+            color: #333;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+        h1, h2, h3 {
+            color: #2c3e50;
+        }
+        .section {
+            margin-bottom: 30px;
+            padding: 20px;
+            background-color: #f9f9f9;
+            border-radius: 5px;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 20px 0;
+        }
+        th, td {
+            padding: 12px;
+            text-align: left;
+            border-bottom: 1px solid #ddd;
+        }
+        th {
+            background-color: #f2f2f2;
+        }
+        .metric-value {
+            font-weight: bold;
+            color: #2c3e50;
+        }
+        .timestamp {
+            color: #666;
+            font-size: 0.9em;
+        }
+        .plot-container {
+            margin: 20px 0;
+            text-align: center;
+        }
+        .plot-container img {
+            max-width: 100%;
+            height: auto;
+        }
+        .test-result {
+            padding: 10px;
+            margin: 10px 0;
+            border-radius: 5px;
+        }
+        .test-result.pass {
+            background-color: #d4edda;
+            color: #155724;
+        }
+        .test-result.fail {
+            background-color: #f8d7da;
+            color: #721c24;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>{{ model_name }} - Regression Analysis Report</h1>
+        <p class="timestamp">Generated on: {{ timestamp }}</p>
+
+        <div class="section">
+            <h2>Model Metrics</h2>
+            <table>
+                <tr>
+                    <th>Metric</th>
+                    <th>Value</th>
+                </tr>
+                {% for metric, value in metrics.items() %}
+                <tr>
+                    <td>{{ metric }}</td>
+                    <td class="metric-value">{{ value }}</td>
+                </tr>
+                {% endfor %}
+            </table>
+        </div>
+
+        <div class="section">
+            <h2>Feature Importance</h2>
+            <table>
+                <tr>
+                    <th>Feature</th>
+                    <th>Importance</th>
+                </tr>
+                {% for feature, importance in feature_importance.items() %}
+                <tr>
+                    <td>{{ feature }}</td>
+                    <td class="metric-value">{{ importance }}</td>
+                </tr>
+                {% endfor %}
+            </table>
+        </div>
+
+        <div class="section">
+            <h2>Residual Analysis</h2>
+            
+            <h3>Normality Tests</h3>
+            <div class="test-result {% if residual_analysis.normality.shapiro_wilk.p_value > 0.05 %}pass{% else %}fail{% endif %}">
+                <p>Shapiro-Wilk Test:</p>
+                <p>Statistic: {{ residual_analysis.normality.shapiro_wilk.statistic }}</p>
+                <p>p-value: {{ residual_analysis.normality.shapiro_wilk.p_value }}</p>
+            </div>
+            
+            <div class="test-result {% if residual_analysis.normality.kolmogorov_smirnov.p_value > 0.05 %}pass{% else %}fail{% endif %}">
+                <p>Kolmogorov-Smirnov Test:</p>
+                <p>Statistic: {{ residual_analysis.normality.kolmogorov_smirnov.statistic }}</p>
+                <p>p-value: {{ residual_analysis.normality.kolmogorov_smirnov.p_value }}</p>
+            </div>
+
+            <h3>Heteroscedasticity Test</h3>
+            <div class="test-result {% if residual_analysis.heteroscedasticity.breusch_pagan_p_value is not none and residual_analysis.heteroscedasticity.breusch_pagan_p_value > 0.05 %}pass{% else %}fail{% endif %}">
+                <p>Breusch-Pagan Test:</p>
+                <p>p-value: {{ residual_analysis.heteroscedasticity.breusch_pagan_p_value if residual_analysis.heteroscedasticity.breusch_pagan_p_value is not none else 'Test failed to compute' }}</p>
+            </div>
+
+            <h3>Autocorrelation Test</h3>
+            <div class="test-result {% if residual_analysis.autocorrelation.durbin_watson is not none and residual_analysis.autocorrelation.durbin_watson > 1.5 and residual_analysis.autocorrelation.durbin_watson < 2.5 %}pass{% else %}fail{% endif %}">
+                <p>Durbin-Watson Statistic: {{ residual_analysis.autocorrelation.durbin_watson if residual_analysis.autocorrelation.durbin_watson is not none else 'Test failed to compute' }}</p>
+            </div>
+        </div>
+
+        <div class="section">
+            <h2>Preprocessing Information</h2>
+            <table>
+                <tr>
+                    <th>Step</th>
+                    <th>Details</th>
+                </tr>
+                {% for step, details in preprocessing_info.items() %}
+                <tr>
+                    <td>{{ step }}</td>
+                    <td>{{ details }}</td>
+                </tr>
+                {% endfor %}
+            </table>
+        </div>
+
+        <div class="section">
+            <h2>Correlation Matrix</h2>
+            <table>
+                <tr>
+                    <th>Feature</th>
+                    {% for feature in correlation_matrix.keys() %}
+                    <th>{{ feature }}</th>
+                    {% endfor %}
+                </tr>
+                {% for feature, correlations in correlation_matrix.items() %}
+                <tr>
+                    <td>{{ feature }}</td>
+                    {% for corr in correlations.values() %}
+                    <td>{{ corr }}</td>
+                    {% endfor %}
+                </tr>
+                {% endfor %}
+            </table>
+        </div>
+
+        <div class="section">
+            <h2>PCA Results</h2>
+            <h3>Explained Variance Ratio</h3>
+            <table>
+                <tr>
+                    <th>Component</th>
+                    <th>Variance Ratio</th>
+                </tr>
+                {% for ratio in pca_results.explained_variance_ratio %}
+                <tr>
+                    <td>PC{{ loop.index }}</td>
+                    <td>{{ ratio }}</td>
+                </tr>
+                {% endfor %}
+            </table>
+        </div>
+    </div>
+</body>
+</html> 
