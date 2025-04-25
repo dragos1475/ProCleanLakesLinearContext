@@ -16,6 +16,16 @@ from statsmodels.stats.diagnostic import het_breuschpagan
 from statsmodels.tsa.stattools import acf
 from statsmodels.stats.stattools import durbin_watson
 import seaborn as sns
+import pandas as pd
+import os
+
+# Set style for all plots
+plt.style.use('seaborn')
+sns.set_style("whitegrid")
+plt.rcParams['figure.figsize'] = [10, 6]
+plt.rcParams['figure.dpi'] = 100
+plt.rcParams['savefig.dpi'] = 300
+plt.rcParams['savefig.bbox'] = 'tight'
 
 class ModelEvaluator:
     def __init__(self, test_size=0.2, random_state=42):
@@ -23,6 +33,20 @@ class ModelEvaluator:
         self.test_size = test_size
         self.random_state = random_state
         self.residual_analysis = {}
+        
+        # Create directory structure for reports
+        self.reports_dir = 'reports'
+        self.plots_dir = os.path.join(self.reports_dir, 'plots')
+        self.ensure_directories()
+    
+    def ensure_directories(self):
+        """Ensure all necessary directories exist"""
+        os.makedirs(self.reports_dir, exist_ok=True)
+        os.makedirs(self.plots_dir, exist_ok=True)
+    
+    def get_plot_path(self, model_name, plot_type):
+        """Get the full path for a plot file"""
+        return os.path.join(self.plots_dir, f'{model_name}_{plot_type}.png')
     
     def split_data(self, X, y):
         """Split data into training and test sets"""
@@ -122,19 +146,17 @@ class ModelEvaluator:
         ax4.grid(True)
         
         plt.tight_layout()
-        plt.savefig(f'{model_name}_residual_analysis.png')
+        plt.savefig(self.get_plot_path(model_name, 'residual_analysis'))
         plt.close()
         
         # Additional plots
-        # 5. Autocorrelation Plot
         plt.figure(figsize=(10, 6))
         sm.graphics.tsa.plot_acf(residuals, lags=20, ax=plt.gca())
         plt.title('Autocorrelation Plot')
         plt.grid(True)
-        plt.savefig(f'{model_name}_autocorrelation.png')
+        plt.savefig(self.get_plot_path(model_name, 'autocorrelation'))
         plt.close()
         
-        # 6. Histogram of Residuals
         plt.figure(figsize=(10, 6))
         plt.hist(residuals, bins=30, alpha=0.7, density=True)
         x = np.linspace(min(residuals), max(residuals), 100)
@@ -143,49 +165,56 @@ class ModelEvaluator:
         plt.ylabel('Density')
         plt.title('Histogram of Residuals')
         plt.grid(True)
-        plt.savefig(f'{model_name}_residual_histogram.png')
+        plt.savefig(self.get_plot_path(model_name, 'residual_histogram'))
         plt.close()
     
     def plot_actual_vs_predicted(self, y_true, y_pred, model_name):
         """Plot actual vs predicted values"""
         plt.figure(figsize=(10, 6))
         plt.scatter(y_true, y_pred, alpha=0.5)
-        plt.plot([y_true.min(), y_true.max()], [y_true.min(), y_true.max()], 'r--')
+        plt.plot([y_true.min(), y_true.max()], [y_true.min(), y_true.max()], 'r--', lw=2)
         plt.xlabel('Actual Values')
         plt.ylabel('Predicted Values')
-        plt.title(f'Actual vs Predicted Values - {model_name}')
-        plt.grid(True)
-        plt.savefig(f'{model_name}_actual_vs_predicted.png')
+        plt.title('Actual vs Predicted Values')
+        
+        output_path = self.get_plot_path(model_name, 'actual_vs_predicted')
+        plt.savefig(output_path)
         plt.close()
-        return f'{model_name}_actual_vs_predicted.png'
+        
+        return output_path
     
     def plot_residuals(self, y_true, y_pred, model_name):
         """Plot residuals"""
         residuals = y_true - y_pred
+        
         plt.figure(figsize=(10, 6))
         plt.scatter(y_pred, residuals, alpha=0.5)
         plt.axhline(y=0, color='r', linestyle='--')
         plt.xlabel('Predicted Values')
         plt.ylabel('Residuals')
-        plt.title(f'Residuals Plot - {model_name}')
-        plt.grid(True)
-        plt.savefig(f'{model_name}_residuals.png')
+        plt.title('Residuals vs Predicted Values')
+        
+        output_path = self.get_plot_path(model_name, 'residuals')
+        plt.savefig(output_path)
         plt.close()
-        return f'{model_name}_residuals.png'
+        
+        return output_path
     
     def plot_error_distribution(self, y_true, y_pred, model_name):
         """Plot error distribution"""
-        errors = y_true - y_pred
+        residuals = y_true - y_pred
+        
         plt.figure(figsize=(10, 6))
-        plt.hist(errors, bins=30, alpha=0.7)
-        plt.axvline(x=0, color='r', linestyle='--')
-        plt.xlabel('Prediction Error')
-        plt.ylabel('Frequency')
-        plt.title(f'Error Distribution - {model_name}')
-        plt.grid(True)
-        plt.savefig(f'{model_name}_error_distribution.png')
+        sns.histplot(residuals, kde=True)
+        plt.xlabel('Residuals')
+        plt.ylabel('Count')
+        plt.title('Distribution of Residuals')
+        
+        output_path = self.get_plot_path(model_name, 'error_distribution')
+        plt.savefig(output_path)
         plt.close()
-        return f'{model_name}_error_distribution.png'
+        
+        return output_path
     
     def save_model(self, model, filename):
         """Save trained model to file"""
@@ -211,9 +240,14 @@ class ModelEvaluator:
         
         return dict(zip(feature_names, importance))
     
-    def calculate_correlation_matrix(self, X):
-        """Calculate correlation matrix for features"""
-        return X.corr()
+    def calculate_correlation_matrix(self, X, y=None):
+        """Calculate correlation matrix for features and optionally include target variable"""
+        if y is None:
+            return X.corr()
+        
+        # Create a DataFrame with both features and target
+        data = pd.concat([X, pd.Series(y, name=y.name, index=X.index)], axis=1)
+        return data.corr()
     
     def perform_pca(self, X):
         """Perform PCA on the features"""
@@ -247,8 +281,7 @@ class ModelEvaluator:
         plt.legend()
         plt.grid(True)
         
-        # Save plot
-        output_path = f'reports/{model_name}_pca_variance.png'
+        output_path = self.get_plot_path(model_name, 'pca_variance')
         plt.savefig(output_path)
         plt.close()
         
@@ -265,8 +298,7 @@ class ModelEvaluator:
                    square=True)
         plt.title('Feature Correlation Heatmap')
         
-        # Save plot
-        output_path = f'reports/{model_name}_correlation_heatmap.png'
+        output_path = self.get_plot_path(model_name, 'correlation_heatmap')
         plt.savefig(output_path)
         plt.close()
         

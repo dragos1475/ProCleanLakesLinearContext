@@ -1,6 +1,6 @@
 # Linear Regression Analysis Tool
 
-A comprehensive tool for performing linear regression analysis with multiple models and detailed evaluation metrics.
+A comprehensive tool for performing linear regression analysis with multiple models and detailed evaluation metrics, supporting both raw and standardized data analysis.
 
 ## Features
 
@@ -13,16 +13,17 @@ A comprehensive tool for performing linear regression analysis with multiple mod
   - RANSAC Regression
   - Huber Regression
   - Theil-Sen Regression
+- Parallel analysis on both raw and standardized data
 
 ### Data Preprocessing
 - Missing value handling
-- Feature scaling
+- Optional feature standardization using StandardScaler
 - Principal Component Analysis (PCA)
-- Correlation analysis
+- Correlation analysis with target variable inclusion
 - Feature importance analysis
 
 ### Model Evaluation
-- Comprehensive metrics:
+- Comprehensive metrics for both raw and standardized data:
   - R-squared
   - Mean Squared Error (MSE)
   - Root Mean Squared Error (RMSE)
@@ -36,29 +37,48 @@ A comprehensive tool for performing linear regression analysis with multiple mod
 
 ### Report Generation
 - Multiple report formats:
-  - HTML reports (individual models)
-  - PDF reports (individual models)
-  - Combined Word report (all models) - `combined_regression_analysis.docx`
-- Report contents:
-  - Model equations with coefficients and intercepts
-  - Performance metrics for each model
-  - Feature importance analysis
-  - Correlation matrix (both as table and heatmap)
-  - PCA analysis:
-    - Explained variance ratio table
-    - Cumulative variance
-    - Component loadings table
-    - PCA variance plot
-  - Residual analysis:
-    - Normality tests
-    - Heteroscedasticity tests
-    - Autocorrelation tests
-  - Visualizations:
-    - Actual vs. Predicted values for each model
-    - Residual plots for each model
-    - Error distribution for each model
-    - PCA variance plot
-    - Correlation heatmap
+  1. Combined Word report (all models) - `combined_regression_analysis.docx`
+  2. Individual HTML reports for each model - `{model_name}_{data_type}_analysis.html`
+  3. General HTML report for correlation and PCA - `general_analysis.html`
+
+#### Word Report Structure
+1. Feature Correlation Analysis (raw data only):
+   - Correlation matrix with target variable
+   - Correlation heatmap
+2. Principal Component Analysis (raw data only):
+   - Explained variance ratio
+   - Component loadings
+   - PCA variance plot
+3. Model Results for Raw Data:
+   - Model equations with raw coefficients
+   - Performance metrics
+   - Feature importance
+   - Residual analysis
+   - Model-specific visualizations
+4. Model Results for Standardized Data:
+   - Model equations with standardized coefficients
+   - Standardization parameters (means and standard deviations)
+   - Performance metrics
+   - Feature importance
+   - Residual analysis
+   - Model-specific visualizations
+
+#### HTML Reports Features
+1. General Analysis Report (`general_analysis.html`):
+   - Interactive correlation matrix and heatmap
+   - PCA analysis with explained variance plots
+   - Component loadings visualization
+   
+2. Model-Specific Reports (`{model_name}_{data_type}_analysis.html`):
+   - Detailed model metrics with interpretations
+   - Interactive feature importance visualization
+   - Model equation with proper mathematical formatting
+   - Performance visualizations:
+     - Actual vs Predicted Values
+     - Residuals Plot
+     - Error Distribution
+   - Standardization parameters (for standardized models)
+   - Color-coded metric interpretations
 
 ### Model Persistence
 - Save trained models in `.joblib` format
@@ -84,24 +104,28 @@ python main.py
    - Set hyperparameters for each model
 
 4. Review the generated reports in the `reports` directory:
-   - Individual model reports (HTML and PDF)
-   - Combined report (DOCX) - contains all models' analysis in a single document
+   - `combined_regression_analysis.docx` - comprehensive Word report
+   - `general_analysis.html` - correlation and PCA analysis
+   - Individual model reports in HTML format
    - Saved models (`.joblib` files)
 
 ## Project Structure
 
 ```
 .
-├── main.py                 # Main script
-├── data_preprocessing.py   # Data preprocessing functions
+├── main.py                 # Main script with parallel raw/standardized analysis
+├── data_preprocessing.py   # Data preprocessing with optional standardization
 ├── regression_models.py    # Regression model implementations
 ├── model_evaluation.py     # Model evaluation metrics and plots
-├── report_generator.py     # Report generation utilities
+├── report_generator.py     # Report generation in Word and HTML formats
 ├── requirements.txt        # Required Python packages
 ├── README.md              # This file
-├── reports/               # Generated reports
-├── models/                # Saved models
-└── templates/             # Report templates
+├── reports/               # Generated reports and visualizations
+│   ├── plots/            # Generated plot images
+│   ├── *.html           # HTML reports
+│   └── *.docx           # Word reports
+├── models/               # Saved models
+└── templates/            # Report templates
 ```
 
 ## Best Practices
@@ -109,22 +133,28 @@ python main.py
 1. Data Preparation:
    - Ensure your dataset is clean and properly formatted
    - Handle missing values appropriately
-   - Consider feature scaling for better model performance
+   - Consider both raw and standardized analysis for comprehensive insights
 
 2. Model Selection:
    - Start with simple models (Linear Regression)
    - Use regularization (Ridge/Lasso) for high-dimensional data
    - Consider robust models (Huber/Theil-Sen) for outliers
+   - Compare model performance on both raw and standardized data
 
 3. Evaluation:
-   - Review all metrics, not just R-squared
+   - Review metrics for both raw and standardized data
    - Check residual analysis for model assumptions
-   - Consider feature importance and correlations
+   - Consider feature importance in both contexts
+   - Use correlation analysis to understand relationships with target variable
 
 4. Report Interpretation:
-   - Focus on model equations and coefficients
-   - Review PCA analysis for dimensionality reduction
+   - Compare raw and standardized model equations
+   - Use standardization parameters for converting between scales
+   - Review PCA and correlation analysis from raw data
    - Check residual plots for model assumptions
+   - Use both Word and HTML reports for different perspectives:
+     - Word report for comprehensive documentation
+     - HTML reports for interactive exploration and sharing
 
 ## Contributing
 

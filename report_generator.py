@@ -17,6 +17,7 @@ from docx.shared import Inches
 import io
 from jinja2 import Template
 import glob
+import shutil
 
 class ReportGenerator:
     def __init__(self, filename="regression_report.pdf", output_dir='reports'):
@@ -394,44 +395,54 @@ class ReportGenerator:
         self.doc.build(self.story)
 
     def cleanup_temp_files(self):
-        """Remove temporary plot files after report generation."""
-        # Patterns for temporary plot files
-        patterns = [
-            '*_actual_vs_predicted.png',
-            '*_residuals.png',
-            '*_error_distribution.png',
-            'pca_variance.png',
-            'correlation_matrix.png'
+        """Remove temporary files after report generation, preserving plot files needed for reports."""
+        # Only remove files that are not needed for reports
+        patterns_to_clean = [
+            '*.joblib',  # Model files
+            '*.log',     # Log files
+            '*.tmp',     # Temporary files
+            '*.pyc',     # Python cache files
+            '*.DS_Store'  # macOS system files
         ]
         
-        # Directories to clean
-        directories = ['.', 'reports']
+        # Clean only non-report files in the main and reports directories
+        directories = ['.', self.output_dir]
         
-        # Remove files matching patterns in each directory
         for directory in directories:
-            for pattern in patterns:
+            # Clean files
+            for pattern in patterns_to_clean:
                 for file in glob.glob(os.path.join(directory, pattern)):
                     try:
                         os.remove(file)
                         print(f"Removed temporary file: {file}")
                     except Exception as e:
-                        print(f"Error removing {file}: {e}")
+                        print(f"Warning: Could not remove {file}: {e}")
+            
+            # Handle __pycache__ directory separately
+            pycache_dir = os.path.join(directory, '__pycache__')
+            if os.path.exists(pycache_dir):
+                try:
+                    shutil.rmtree(pycache_dir)
+                    print(f"Removed directory: {pycache_dir}")
+                except Exception as e:
+                    print(f"Warning: Could not remove {pycache_dir}: {e}")
 
-    def generate_combined_word_report(self, model_name, metrics, feature_importance, correlation_matrix, pca_results, 
-                                    residual_analysis, actual_vs_predicted, residuals_plot, error_distribution, 
-                                    pca_variance_plot, correlation_heatmap):
-        """Generate a Word document containing all reports."""
+    def generate_combined_word_report(self, raw_results, standardized_results, target_name):
+        """Generate a Word document containing reports for both raw and standardized data analysis."""
         doc = Document()
         
         # Add title
-        doc.add_heading(f'Regression Analysis Report - {model_name}', 0)
+        doc.add_heading('Regression Analysis Report - Raw and Standardized Data', 0)
         doc.add_paragraph(f'Generated on: {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}')
         
-        # Add correlation matrix section
-        doc.add_heading('Feature Correlation Analysis', level=1)
-        doc.add_paragraph('The correlation matrix shows the relationships between different features:')
+        # Add correlation analysis section (using raw data only)
+        first_model_raw = next(iter(raw_results.values()))
         
-        # Add correlation matrix as table
+        doc.add_heading('Feature Correlation Analysis', level=1)
+        
+        # Raw data correlation (including target variable)
+        doc.add_heading('Correlation Matrix', level=2)
+        correlation_matrix = first_model_raw['correlation_matrix']
         correlation_table = doc.add_table(rows=1, cols=len(correlation_matrix.columns) + 1)
         correlation_table.style = 'Table Grid'
         
@@ -448,16 +459,16 @@ class ReportGenerator:
             for j, value in enumerate(row):
                 row_cells[j + 1].text = f'{value:.3f}'
         
-        # Add correlation heatmap (only once)
-        if isinstance(correlation_heatmap, dict):
-            # Get the first available plot path
-            plot_path = next((path for path in correlation_heatmap.values() if path and os.path.exists(path)), None)
-            if plot_path:
-                doc.add_paragraph('\nCorrelation Heatmap:')
-                doc.add_picture(plot_path, width=Inches(6))
+        # Add correlation heatmap
+        if 'correlation_heatmap' in first_model_raw['plots']:
+            doc.add_paragraph('\nCorrelation Heatmap:')
+            doc.add_picture(first_model_raw['plots']['correlation_heatmap'], width=Inches(6))
         
         # Add PCA analysis section
         doc.add_heading('Principal Component Analysis', level=1)
+        
+        # Raw data PCA
+        pca_results = first_model_raw['pca_results']
         
         # Add explained variance ratio
         doc.add_heading('Explained Variance Ratio', level=2)
@@ -476,7 +487,12 @@ class ReportGenerator:
             row_cells[1].text = f'{var:.4f}'
             row_cells[2].text = f'{cumulative_variance:.4f}'
         
-        # Add component loadings table
+        # Add PCA variance plot
+        if 'pca_variance' in first_model_raw['plots']:
+            doc.add_paragraph('\nPCA Explained Variance:')
+            doc.add_picture(first_model_raw['plots']['pca_variance'], width=Inches(6))
+        
+        # Add component loadings
         doc.add_heading('Component Loadings', level=2)
         loadings_table = doc.add_table(rows=1, cols=len(pca_results['components']) + 1)
         loadings_table.style = 'Table Grid'
@@ -488,108 +504,567 @@ class ReportGenerator:
             header_cells[i + 1].text = f'PC{i+1}'
         
         # Add loadings values
-        for i, feature in enumerate(correlation_matrix.columns):
+        features = [col for col in correlation_matrix.columns if col != target_name]
+        for i, feature in enumerate(features):
             row_cells = loadings_table.add_row().cells
             row_cells[0].text = feature
             for j in range(len(pca_results['components'])):
                 row_cells[j + 1].text = f'{pca_results["components"][j][i]:.4f}'
         
-        # Add PCA variance plot (only once)
-        if isinstance(pca_variance_plot, dict):
-            # Get the first available plot path
-            plot_path = next((path for path in pca_variance_plot.values() if path and os.path.exists(path)), None)
-            if plot_path:
-                doc.add_paragraph('\nPCA Explained Variance Plot:')
-                doc.add_picture(plot_path, width=Inches(6))
-        
-        # Add model equations section
-        doc.add_heading('Model Equations', level=1)
-        for model_name, model_metrics in metrics.items():
-            if 'coefficients' in model_metrics and 'intercept' in model_metrics:
-                doc.add_heading(f'{model_name} Equation', level=2)
-                equation = f"y = {model_metrics['intercept']:.4f}"
-                for feature, coef in model_metrics['coefficients'].items():
-                    equation += f" + {coef:.4f} * {feature}"
+        # Add model results sections
+        for data_type, results in [("Raw Data", raw_results), ("Standardized Data", standardized_results)]:
+            doc.add_heading(f'\nModel Results for {data_type}', level=1)
+            
+            for model_name, model_results in results.items():
+                doc.add_heading(f'\n{model_name}', level=2)
+                
+                # Model metrics
+                doc.add_heading('Model Metrics', level=3)
+                metrics_table = doc.add_table(rows=1, cols=2)
+                metrics_table.style = 'Table Grid'
+                metrics_table.rows[0].cells[0].text = 'Metric'
+                metrics_table.rows[0].cells[1].text = 'Value'
+                
+                for metric, value in model_results['metrics'].items():
+                    if metric not in ['coefficients', 'intercept', 'scaling_params']:
+                        row = metrics_table.add_row()
+                        row.cells[0].text = metric
+                        row.cells[1].text = f'{value:.4f}' if isinstance(value, (int, float)) else str(value)
+                
+                # Model equation
+                doc.add_heading('Model Equation', level=3)
+                coefficients = model_results['metrics']['coefficients']
+                intercept = model_results['metrics']['intercept']
+                
+                if data_type == "Raw Data":
+                    equation = f"{target_name} = {intercept:.4f}"
+                    for feature, coef in coefficients.items():
+                        equation += f" + ({coef:.4f} × {feature})"
+                else:
+                    equation = f"Z_{target_name} = {intercept:.4f}"
+                    for feature, coef in coefficients.items():
+                        equation += f" + ({coef:.4f} × Z_{feature})"
+                
                 doc.add_paragraph(equation)
-        
-        # Add model metrics section
-        doc.add_heading('Model Metrics', level=1)
-        for model_name, model_metrics in metrics.items():
-            doc.add_heading(model_name, level=2)
-            metrics_table = doc.add_table(rows=1, cols=2)
-            metrics_table.style = 'Table Grid'
-            header_cells = metrics_table.rows[0].cells
-            header_cells[0].text = 'Metric'
-            header_cells[1].text = 'Value'
-            
-            for metric, value in model_metrics.items():
-                if metric not in ['coefficients', 'intercept']:  # Skip coefficients and intercept as they're in equations
-                    row_cells = metrics_table.add_row().cells
-                    row_cells[0].text = metric
-                    row_cells[1].text = f'{value:.4f}'
-        
-        # Add feature importance section
-        doc.add_heading('Feature Importance', level=1)
-        for model_name, importance in feature_importance.items():
-            doc.add_heading(model_name, level=2)
-            importance_table = doc.add_table(rows=1, cols=2)
-            importance_table.style = 'Table Grid'
-            header_cells = importance_table.rows[0].cells
-            header_cells[0].text = 'Feature'
-            header_cells[1].text = 'Importance'
-            
-            for feature, imp in importance.items():
-                row_cells = importance_table.add_row().cells
-                row_cells[0].text = feature
-                row_cells[1].text = f'{imp:.4f}'
-        
-        # Add residual analysis section
-        doc.add_heading('Residual Analysis', level=1)
-        for model_name, analysis in residual_analysis.items():
-            doc.add_heading(model_name, level=2)
-            residual_table = doc.add_table(rows=1, cols=2)
-            residual_table.style = 'Table Grid'
-            header_cells = residual_table.rows[0].cells
-            header_cells[0].text = 'Test'
-            header_cells[1].text = 'Result'
-            
-            for test, result in analysis.items():
-                row_cells = residual_table.add_row().cells
-                row_cells[0].text = test
-                row_cells[1].text = str(result)
-        
-        # Add plots section
-        doc.add_heading('Model Visualizations', level=1)
-        
-        # Add actual vs predicted plots
-        if isinstance(actual_vs_predicted, dict):
-            doc.add_heading('Actual vs Predicted Values', level=2)
-            for model_name, plot_path in actual_vs_predicted.items():
-                if plot_path and os.path.exists(plot_path):
-                    doc.add_heading(f'{model_name}', level=3)
-                    doc.add_picture(plot_path, width=Inches(6))
-        
-        # Add residuals plots
-        if isinstance(residuals_plot, dict):
-            doc.add_heading('Residuals Plots', level=2)
-            for model_name, plot_path in residuals_plot.items():
-                if plot_path and os.path.exists(plot_path):
-                    doc.add_heading(f'{model_name}', level=3)
-                    doc.add_picture(plot_path, width=Inches(6))
-        
-        # Add error distribution plots
-        if isinstance(error_distribution, dict):
-            doc.add_heading('Error Distribution', level=2)
-            for model_name, plot_path in error_distribution.items():
-                if plot_path and os.path.exists(plot_path):
-                    doc.add_heading(f'{model_name}', level=3)
-                    doc.add_picture(plot_path, width=Inches(6))
+                
+                if data_type == "Standardized Data":
+                    # Add standardization parameters
+                    doc.add_heading('Standardization Parameters', level=3)
+                    scaling_params = model_results['metrics']['scaling_params']
+                    
+                    doc.add_paragraph("Feature Means:")
+                    for feature, mean in scaling_params['feature_means'].items():
+                        doc.add_paragraph(f"• {feature}: {mean:.4f}")
+                    
+                    doc.add_paragraph("\nFeature Standard Deviations:")
+                    for feature, std in scaling_params['feature_stds'].items():
+                        doc.add_paragraph(f"• {feature}: {std:.4f}")
+                    
+                    doc.add_paragraph(f"\nTarget Mean: {scaling_params['target_mean']:.4f}")
+                    doc.add_paragraph(f"Target Standard Deviation: {scaling_params['target_std']:.4f}")
+                
+                # Feature importance
+                doc.add_heading('Feature Importance', level=3)
+                importance_table = doc.add_table(rows=1, cols=2)
+                importance_table.style = 'Table Grid'
+                importance_table.rows[0].cells[0].text = 'Feature'
+                importance_table.rows[0].cells[1].text = 'Importance'
+                
+                for feature, importance in model_results['feature_importance'].items():
+                    row = importance_table.add_row()
+                    row.cells[0].text = feature
+                    row.cells[1].text = f'{importance:.4f}'
+                
+                # Residual analysis
+                doc.add_heading('Residual Analysis', level=3)
+                residual_table = doc.add_table(rows=1, cols=3)
+                residual_table.style = 'Table Grid'
+                header_cells = residual_table.rows[0].cells
+                header_cells[0].text = 'Test'
+                header_cells[1].text = 'Statistic'
+                header_cells[2].text = 'p-value'
+                
+                for test_name, test_results in model_results['residual_analysis'].items():
+                    if isinstance(test_results, dict):
+                        for sub_test, sub_results in test_results.items():
+                            row = residual_table.add_row()
+                            row.cells[0].text = f'{test_name} - {sub_test}'
+                            if isinstance(sub_results, dict):
+                                row.cells[1].text = f"{sub_results.get('statistic', 'N/A')}"
+                                row.cells[2].text = f"{sub_results.get('p_value', 'N/A')}"
+                            else:
+                                row.cells[1].text = f"{sub_results}"
+                                row.cells[2].text = "N/A"
+                
+                # Add model-specific plots (excluding correlation and PCA plots)
+                doc.add_heading('Model Visualizations', level=3)
+                for plot_name, plot_path in model_results['plots'].items():
+                    if plot_name not in ['correlation_heatmap', 'pca_variance'] and plot_path and os.path.exists(plot_path):
+                        doc.add_paragraph(f'\n{plot_name.replace("_", " ").title()}:')
+                        doc.add_picture(plot_path, width=Inches(6))
         
         # Save the document
-        output_path = os.path.join(self.output_dir, f'combined_regression_analysis.docx')
+        output_path = os.path.join(self.output_dir, 'combined_regression_analysis.docx')
         doc.save(output_path)
         
         # Clean up temporary files
         self.cleanup_temp_files()
+        
+        return output_path
+
+    def generate_html_report(self, model_name, data_type, results, target_name):
+        """Generate HTML report for a specific model and data type (raw or standardized)"""
+        # Create reports directory if it doesn't exist
+        os.makedirs('reports', exist_ok=True)
+        
+        # Get target_std from metrics if available (standardized data) or calculate it for raw data
+        if 'scaling_params' in results['metrics']:
+            target_std = results['metrics']['scaling_params']['target_std']
+        else:
+            # For raw data, we'll use more generous thresholds
+            target_std = 1.0  # Using 1.0 as a baseline for raw data
+        
+        # Add target_std to metrics for template use
+        results['metrics']['target_std'] = target_std
+        
+        # Update plot paths to use the correct path (plots directory)
+        plots = {}
+        for plot_name, plot_path in results['plots'].items():
+            if plot_path:
+                plots[plot_name] = os.path.join('plots', os.path.basename(plot_path))
+        
+        # Prepare template data
+        template_data = {
+            'model_name': model_name,
+            'data_type': data_type,
+            'target_name': target_name,
+            'metrics': results['metrics'],
+            'model_equation': results['model_equation'],
+            'feature_importance': results['feature_importance'],
+            'plots': plots
+        }
+        
+        # Load and customize the template
+        template_str = """
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <meta charset="UTF-8">
+            <title>{{ model_name }} - {{ data_type }} Analysis Report</title>
+            <style>
+                body { 
+                    font-family: Arial, sans-serif; 
+                    margin: 20px; 
+                    line-height: 1.6;
+                    color: #333;
+                    max-width: 1200px;
+                    margin: 0 auto;
+                    padding: 20px;
+                }
+                h1, h2 { 
+                    color: #2c3e50; 
+                    border-bottom: 2px solid #eee;
+                    padding-bottom: 10px;
+                }
+                .section { 
+                    margin-bottom: 40px; 
+                    background: #fff;
+                    padding: 20px;
+                    border-radius: 8px;
+                    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+                }
+                table { 
+                    border-collapse: collapse; 
+                    width: 100%; 
+                    margin: 20px 0;
+                    background: #fff;
+                }
+                th, td { 
+                    border: 1px solid #ddd; 
+                    padding: 12px; 
+                    text-align: left; 
+                }
+                th { 
+                    background-color: #f8f9fa;
+                    font-weight: bold;
+                }
+                tr:nth-child(even) { background-color: #f8f9fa; }
+                .good { color: #28a745; font-weight: bold; }
+                .warning { color: #ffc107; font-weight: bold; }
+                .error { color: #dc3545; font-weight: bold; }
+                .plot { 
+                    margin: 20px 0;
+                    text-align: center;
+                }
+                .plot img {
+                    max-width: 100%;
+                    height: auto;
+                    border-radius: 4px;
+                    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+                }
+                .equation {
+                    background: #f8f9fa;
+                    padding: 15px;
+                    border-radius: 4px;
+                    font-family: monospace;
+                    margin: 20px 0;
+                }
+                .feature-importance {
+                    display: flex;
+                    flex-direction: column;
+                    gap: 10px;
+                }
+                .feature-bar {
+                    display: flex;
+                    align-items: center;
+                    gap: 10px;
+                }
+                .bar {
+                    background: #007bff;
+                    height: 20px;
+                    border-radius: 4px;
+                }
+            </style>
+        </head>
+        <body>
+            <h1>{{ model_name }} - {{ data_type }} Analysis Report</h1>
+            
+            <div class="section">
+                <h2>Model Metrics</h2>
+                <table>
+                    <tr>
+                        <th>Metric</th>
+                        <th>Value</th>
+                        <th>Interpretation</th>
+                    </tr>
+                    <tr>
+                        <td>R² Score</td>
+                        <td>{{ "%.4f"|format(metrics.R2) }}</td>
+                        <td>{% if metrics.R2 >= 0.7 %}<span class="good">Good fit</span>
+                            {% elif metrics.R2 >= 0.5 %}<span class="warning">Moderate fit</span>
+                            {% else %}<span class="error">Poor fit</span>{% endif %}</td>
+                    </tr>
+                    <tr>
+                        <td>RMSE</td>
+                        <td>{{ "%.4f"|format(metrics.RMSE) }}</td>
+                        <td>{% if data_type == 'Standardized' %}
+                            {% if metrics.RMSE <= 0.3 %}<span class="good">Low error</span>
+                            {% elif metrics.RMSE <= 0.5 %}<span class="warning">Moderate error</span>
+                            {% else %}<span class="error">High error</span>{% endif %}
+                            {% else %}
+                            {% if metrics.RMSE <= metrics.target_std * 0.3 %}<span class="good">Low error</span>
+                            {% elif metrics.RMSE <= metrics.target_std * 0.5 %}<span class="warning">Moderate error</span>
+                            {% else %}<span class="error">High error</span>{% endif %}
+                            {% endif %}</td>
+                    </tr>
+                    <tr>
+                        <td>MAE</td>
+                        <td>{{ "%.4f"|format(metrics.MAE) }}</td>
+                        <td>{% if data_type == 'Standardized' %}
+                            {% if metrics.MAE <= 0.25 %}<span class="good">Low error</span>
+                            {% elif metrics.MAE <= 0.4 %}<span class="warning">Moderate error</span>
+                            {% else %}<span class="error">High error</span>{% endif %}
+                            {% else %}
+                            {% if metrics.MAE <= metrics.target_std * 0.25 %}<span class="good">Low error</span>
+                            {% elif metrics.MAE <= metrics.target_std * 0.4 %}<span class="warning">Moderate error</span>
+                            {% else %}<span class="error">High error</span>{% endif %}
+                            {% endif %}</td>
+                    </tr>
+                    <tr>
+                        <td>Explained Variance</td>
+                        <td>{{ "%.4f"|format(metrics['Explained Variance']) }}</td>
+                        <td>{% if metrics['Explained Variance'] >= 0.7 %}<span class="good">Good explanation</span>
+                            {% elif metrics['Explained Variance'] >= 0.5 %}<span class="warning">Moderate explanation</span>
+                            {% else %}<span class="error">Poor explanation</span>{% endif %}</td>
+                    </tr>
+                </table>
+                
+                {% if data_type == 'Standardized' and metrics.scaling_params %}
+                <h3>Standardization Parameters</h3>
+                <table>
+                    <tr>
+                        <th>Parameter</th>
+                        <th>Value</th>
+                    </tr>
+                    <tr>
+                        <td>Target Mean</td>
+                        <td>{{ "%.4f"|format(metrics.scaling_params.target_mean) }}</td>
+                    </tr>
+                    <tr>
+                        <td>Target Standard Deviation</td>
+                        <td>{{ "%.4f"|format(metrics.scaling_params.target_std) }}</td>
+                    </tr>
+                </table>
+                
+                <h4>Feature Scaling Parameters</h4>
+                <table>
+                    <tr>
+                        <th>Feature</th>
+                        <th>Mean</th>
+                        <th>Standard Deviation</th>
+                    </tr>
+                    {% for feature in metrics.scaling_params.feature_means.keys() %}
+                    <tr>
+                        <td>{{ feature }}</td>
+                        <td>{{ "%.4f"|format(metrics.scaling_params.feature_means[feature]) }}</td>
+                        <td>{{ "%.4f"|format(metrics.scaling_params.feature_stds[feature]) }}</td>
+                    </tr>
+                    {% endfor %}
+                </table>
+                {% endif %}
+            </div>
+
+            <div class="section">
+                <h2>Model Equation</h2>
+                <div class="equation">
+                    {% if data_type == 'Raw' %}
+                    {{ target_name }} = {{ "%.4f"|format(model_equation.intercept) }}
+                    {% for feature, coef in model_equation.coefficients.items() %}
+                    {% if coef >= 0 %} + {% endif %}{{ "%.4f"|format(coef) }} &times; {{ feature }}
+                    {% endfor %}
+                    {% else %}
+                    Z_{{ target_name }} = {{ "%.4f"|format(model_equation.intercept) }}
+                    {% for feature, coef in model_equation.coefficients.items() %}
+                    {% if coef >= 0 %} + {% endif %}{{ "%.4f"|format(coef) }} &times; Z_{{ feature }}
+                    {% endfor %}
+                    {% endif %}
+                </div>
+            </div>
+
+            <div class="section">
+                <h2>Feature Importance</h2>
+                <div class="feature-importance">
+                    {% for feature, importance in feature_importance.items() %}
+                    <div class="feature-bar">
+                        <span style="width: 200px;">{{ feature }}</span>
+                        <div class="bar" style="width: {{ importance * 100 }}%;"></div>
+                        <span>{{ "%.4f"|format(importance) }}</span>
+                    </div>
+                    {% endfor %}
+                </div>
+            </div>
+
+            <div class="section">
+                <h2>Model Performance Visualizations</h2>
+                {% if plots.actual_vs_predicted %}
+                <div class="plot">
+                    <h3>Actual vs Predicted Values</h3>
+                    <img src="{{ plots.actual_vs_predicted }}" alt="Actual vs Predicted Values">
+                </div>
+                {% endif %}
+                {% if plots.residuals %}
+                <div class="plot">
+                    <h3>Residuals Plot</h3>
+                    <img src="{{ plots.residuals }}" alt="Residuals Plot">
+                </div>
+                {% endif %}
+                {% if plots.error_distribution %}
+                <div class="plot">
+                    <h3>Error Distribution</h3>
+                    <img src="{{ plots.error_distribution }}" alt="Error Distribution">
+                </div>
+                {% endif %}
+            </div>
+        </body>
+        </html>
+        """
+        
+        # Generate HTML
+        template = Template(template_str)
+        html_content = template.render(**template_data)
+        
+        # Save HTML file with UTF-8 encoding
+        output_path = os.path.join('reports', f'{model_name}_{data_type.lower()}_analysis.html')
+        with open(output_path, 'w', encoding='utf-8') as f:
+            f.write(html_content)
+        
+        return output_path
+
+    def generate_general_html_report(self, correlation_matrix, correlation_plot, pca_results, pca_plots, target_name):
+        """Generate general HTML report with correlation and PCA analysis"""
+        # Create reports directory if it doesn't exist
+        os.makedirs('reports', exist_ok=True)
+        
+        # Update plot paths to use the correct path (plots directory)
+        updated_plots = {}
+        # Update correlation plot path
+        if correlation_plot:
+            updated_plots['correlation'] = os.path.join('plots', os.path.basename(correlation_plot))
+        
+        # Update PCA plot paths
+        updated_pca_plots = {}
+        for plot_name, plot_path in pca_plots.items():
+            if plot_path:
+                updated_pca_plots[plot_name] = os.path.join('plots', os.path.basename(plot_path))
+        
+        # Calculate cumulative variance ratio
+        cumulative_variance = np.cumsum(pca_results['explained_variance_ratio'])
+        
+        # Prepare template data with required Python functions
+        template_data = {
+            'target_name': target_name,
+            'correlation_matrix': correlation_matrix,
+            'correlation_plot': updated_plots.get('correlation', ''),
+            'pca_results': {
+                'explained_variance_ratio': pca_results['explained_variance_ratio'],
+                'cumulative_variance_ratio': cumulative_variance,
+                'components': pca_results['components'],
+                'feature_names': [col for col in correlation_matrix.columns if col != target_name]
+            },
+            'pca_plots': updated_pca_plots,
+            'zip': zip,
+            'enumerate': enumerate,
+            'range': range,
+            'len': len,
+            'format_float': lambda x: f"{x:.3f}"
+        }
+        
+        # Load and customize the template
+        template = Template("""
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <meta charset="UTF-8">
+            <title>General Analysis Report</title>
+            <style>
+                body {
+                    font-family: Arial, sans-serif;
+                    margin: 40px;
+                    line-height: 1.6;
+                }
+                .section {
+                    margin-bottom: 30px;
+                    background: #fff;
+                    padding: 20px;
+                    border-radius: 8px;
+                    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+                }
+                table {
+                    border-collapse: collapse;
+                    width: 100%;
+                    margin: 20px 0;
+                }
+                th, td {
+                    border: 1px solid #ddd;
+                    padding: 12px;
+                    text-align: center;
+                }
+                th {
+                    background-color: #f2f2f2;
+                }
+                tr:nth-child(even) {
+                    background-color: #f9f9f9;
+                }
+                img {
+                    max-width: 100%;
+                    height: auto;
+                    margin: 20px 0;
+                    border-radius: 4px;
+                    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+                }
+                .plot-container {
+                    text-align: center;
+                    margin: 20px 0;
+                }
+                h1, h2, h3 {
+                    color: #2c3e50;
+                    border-bottom: 2px solid #eee;
+                    padding-bottom: 10px;
+                }
+            </style>
+        </head>
+        <body>
+            <h1>General Analysis Report</h1>
+            
+            <div class="section">
+                <h2>Correlation Analysis</h2>
+                <p>Correlation matrix for all variables including the target variable ({{ target_name }}):</p>
+                <table>
+                    <tr>
+                        <th></th>
+                        {% for col in correlation_matrix.columns %}
+                        <th>{{ col }}</th>
+                        {% endfor %}
+                    </tr>
+                    {% for index, row in correlation_matrix.iterrows() %}
+                    <tr>
+                        <th>{{ index }}</th>
+                        {% for value in row %}
+                        <td>{{ format_float(value) }}</td>
+                        {% endfor %}
+                    </tr>
+                    {% endfor %}
+                </table>
+                
+                {% if correlation_plot %}
+                <div class="plot-container">
+                    <h3>Correlation Heatmap</h3>
+                    <img src="{{ correlation_plot }}" alt="Correlation Heatmap">
+                </div>
+                {% endif %}
+            </div>
+            
+            <div class="section">
+                <h2>Principal Component Analysis (PCA)</h2>
+                
+                <h3>Explained Variance Ratio</h3>
+                <table>
+                    <tr>
+                        <th>Component</th>
+                        <th>Explained Variance Ratio</th>
+                        <th>Cumulative Explained Variance Ratio</th>
+                    </tr>
+                    {% for i in range(len(pca_results['explained_variance_ratio'])) %}
+                    <tr>
+                        <td>PC{{ i + 1 }}</td>
+                        <td>{{ format_float(pca_results['explained_variance_ratio'][i]) }}</td>
+                        <td>{{ format_float(pca_results['cumulative_variance_ratio'][i]) }}</td>
+                    </tr>
+                    {% endfor %}
+                </table>
+                
+                <h3>Component Loadings</h3>
+                <table>
+                    <tr>
+                        <th>Feature</th>
+                        {% for i in range(pca_results['components'].shape[1]) %}
+                        <th>PC{{ i + 1 }}</th>
+                        {% endfor %}
+                    </tr>
+                    {% for feature, loadings in zip(pca_results['feature_names'], pca_results['components']) %}
+                    <tr>
+                        <td>{{ feature }}</td>
+                        {% for loading in loadings %}
+                        <td>{{ format_float(loading) }}</td>
+                        {% endfor %}
+                    </tr>
+                    {% endfor %}
+                </table>
+                
+                {% if pca_plots.get('variance') %}
+                <div class="plot-container">
+                    <h3>PCA Variance Plot</h3>
+                    <img src="{{ pca_plots['variance'] }}" alt="PCA Variance Plot">
+                </div>
+                {% endif %}
+                
+                {% if pca_plots.get('loadings') %}
+                <div class="plot-container">
+                    <h3>PCA Loadings Plot</h3>
+                    <img src="{{ pca_plots['loadings'] }}" alt="PCA Loadings Plot">
+                </div>
+                {% endif %}
+            </div>
+        </body>
+        </html>
+        """)
+        
+        # Generate HTML
+        html_content = template.render(**template_data)
+        
+        # Save HTML file
+        output_path = os.path.join('reports', 'general_analysis.html')
+        with open(output_path, 'w', encoding='utf-8') as f:
+            f.write(html_content)
         
         return output_path 
